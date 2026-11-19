@@ -1,0 +1,176 @@
+load("WGCNA_data.RData")
+
+############################################ Loading External Libraries ##########################
+
+library(WGCNA)
+
+library(flashClust)
+
+allowWGCNAThreads()
+
+options(stringsAsFactors = FALSE);
+
+enableWGCNAThreads()
+
+########################################## WGCNA Algorithm ####################################### 
+
+powers = c(c(1:10), seq(from = 12, to=20, by=2));
+
+sft = pickSoftThreshold(t(counts), powerVector = powers, verbose = 5)
+
+softPower = 12;
+
+adj= adjacency(t(counts),type = "signed", power = softPower);
+
+TOM=TOMsimilarityFromExpr(t(counts),networkType = "signed", TOMType = "signed", power = softPower);
+
+colnames(TOM) =rownames(TOM) = rownames(counts)
+
+dissTOM=1-TOM
+
+geneTree = flashClust(as.dist(dissTOM),method="average");
+
+plot(geneTree, xlab="", sub="",cex=0.3);
+
+minModuleSize = 20;
+
+dynamicMods = cutreeDynamic(dendro = geneTree,  method="tree", minClusterSize = minModuleSize);
+
+dynamicColors = labels2colors(dynamicMods)
+
+plotDendroAndColors(geneTree,dynamicColors,"Dynamic Tree Cut",dendroLabels=FALSE,hang=0.03,addGuide=TRUE,guideHang=0.05,main="Gene dendrogram and 
+
+module colors")
+
+#################################### Exporting Dynamic Modules to Text File #########################
+
+module_colors= setdiff(unique(dynamicColors), "grey")
+
+for (color in module_colors){
+   
+    module=rownames(counts)[which(dynamicColors==color)]
+   
+    write.table(module, paste("module_",color, ".txt",sep=""), sep="\t", row.names=FALSE, col.names=FALSE,quote=FALSE)
+    
+}
+
+MEs0 = moduleEigengenes(t(counts), dynamicColors)$eigengenes
+
+MEs = orderMEs(MEs0)
+
+mytraits <-  read.csv("Clinical_SIT.csv",stringsAsFactors = F,header = T)
+
+dframeToMatrix <- function(x) {
+ 
+ m <- as.data.frame(x[,-1])
+ 
+ rownames(m) <- x[,1]
+ 
+ m
+}
+datTraits <- dframeToMatrix(mytraits)
+
+Sample <-  c(rep(as.numeric(0),1,10),rep(as.numeric(1),1,10))
+
+datTraits <- cbind(datTraits,Sample)
+
+nam <- names(datTraits)
+
+nam[2] <- "VO2max"
+
+moduleTraitCor = cor(MEs, datTraits, use = "p");
+ 
+moduleTraitPvalue = corPvalueStudent(moduleTraitCor,20);
+ 
+textMatrix = paste(signif(moduleTraitCor, 2), "\n(",signif(moduleTraitPvalue, 1), ")", sep = "");
+
+dim(textMatrix) = dim(moduleTraitCor)
+
+library(Cairo)
+
+Cairo(3000,4000,file="New_Trait_Updated.png", type="png", bg="white",res=450)
+
+par(mar = c(5.2, 8, 0.5, 1));
+ 
+labeledHeatmap(Matrix = moduleTraitCor,xLabels = nam,yLabels = names(MEs),
+ySymbols = substring(names(MEs),3),
+colorLabels = FALSE,colors = greenWhiteRed(50),
+textMatrix = textMatrix,setStdMargins = FALSE,cex.text = 0.6,zlim = c(-1,1))
+dev.off()
+
+
+######################### Dynamic Tree Image ########################################
+
+library(Cairo)
+
+Cairo(4000,3000,file="Dynamic_Tree", type="png", bg="white",res=350)
+
+plotDendroAndColors(geneTree,dynamicColors,"Dynamic Tree Cut",dendroLabels=FALSE,hang=0.03,addGuide=TRUE,guideHang=0.05,main="Gene dendrogram and 
++ module colors")
+
+dev.off()
+
+################################## Find to number of matching ############################
+
+df <- data.frame()
+
+	c <- NULL;
+	
+	v <- NULL;
+
+for (color in module_colors){
+
+print(paste0("Reading----",color))
+
+c[color] <- color;
+
+p <-  read.table(file= paste("module_",color, ".txt",sep=""),sep="\t",header=F)
+
+p<- as.character(p$V1)
+
+v[color] <- (length(which(p %in% rownames(Down_Reg_After))))
+
+df <- cbind(c,v)
+
+colnames(df) <- c("Colors","No. of Match with Upregulated miRNAs")
+
+
+###################### Module Membership and Gene Significance with PTT ############################
+
+par(mfrow = c(2, 2))
+ 
+ selectModules = c("midnightblue", "purple", "greenyellow", "royalblue")
+ 
+ par(mfrow = c(2, length(selectModules)/2))
+ 
+ for (module in selectModules) {
+     
+ column = match(module, colorOfColumn)
+
+ restModule = dynamicColors == module                  
+ verboseScatterplot(datKME[restModule, column], PTT[restModule], xlab = paste("Module Membership ",
+
+ module, "module"), ylab = "PTT", main = paste("kME.", module, 
+                                                      
+ PTT = as.data.frame(datTraits$PTT)
+ 
+ names(PTT) = "PTT"
+ 
+ GS.PTT = as.numeric(cor(t(counts), PTT, use = "p"))
+  
+ par(mfrow = c(2, length(selectModules)/2))
+ 
+ for (module in selectModules) {
+ 
+ column = match(module, colorOfColumn)
+ 
+ restModule = dynamicColors == module
+ 
+ verboseScatterplot(datKME[restModule, column], GS.PTT[restModule], xlab = paste("Module Membership ",
+ 
+ module, "module"), ylab = "PTT", main = paste("kME.", module,
+ 
+ "vs PTT"), col = module) }
+ 
+
+
