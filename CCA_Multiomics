@@ -1,0 +1,228 @@
+library(PMA)
+library(dplyr)
+library(ggplot2)
+library(ggpubr)
+
+
+View(B_lipid)
+View(B_temp_pheno)
+row.names(B_temp_pheno)<- row.names(B_lipid)
+
+B_lipid <- B_lipid %>% mutate(across(everything(), ~ replace(., is.na(.), min(., na.rm = TRUE) / 2)))
+B_temp_pheno <- B_temp_pheno %>% mutate(across(everything(), ~ replace(., is.na(.), min(., na.rm = TRUE) / 2)))
+B_lipid <- log2(B_lipid)
+# Standardize data
+Lipids_scaled <- scale(B_lipid)
+Proteins_scaled <- scale(data_Pre_Processed)
+Traits_scaled <- scale(B_pheno)
+
+# Load necessary libraries
+install.packages("PMA")       # For Regularized CCA
+install.packages("ggplot2")   # For visualization
+install.packages("reshape2")  # For melting traits data
+library(PMA)
+library(ggplot2)
+library(reshape2)
+library(caret)
+
+# Assuming your data is already loaded:
+# lipid_matrix_reduced: 154 x 255 (samples x lipids)
+# protein_matrix_reduced: 154 x 100 (samples x proteins)
+# B_temp_pheno: 154 x 12 (samples x traits)
+
+# Compute the correlation matrix for lipid and protein data
+
+lipid_matrix <- as.matrix(B_lipid)
+protein_matrix <- as.matrix(data_Pre_Processed)
+cor_lipid <- cor(lipid_matrix)
+cor_protein <- cor(protein_matrix)
+
+# Find variables with correlation > 0.95 (or another threshold)
+high_cor_lipid <- findCorrelation(cor_lipid, cutoff = 0.95)
+high_cor_protein <- findCorrelation(cor_protein, cutoff = 0.99)
+# Remove highly correlated variables
+lipid_matrix_reduced <- lipid_matrix[, -high_cor_lipid]
+protein_matrix_reduced <- protein_matrix[, -high_cor_protein]
+dim(lipid_matrix_reduced)
+dim(protein_matrix_reduced)
+# Step 1: Perform Regularized CCA
+
+rcca_result <- CCA(lipid_matrix_reduced, protein_matrix_reduced, typex = "standard", typez = "standard", K = 5)
+
+# Step 2: Extract canonical loadings
+lipid_loadings <- rcca_result$u  # Loadings for lipids (255 x 5)
+protein_loadings <- rcca_result$v  # Loadings for proteins (100 x 5)
+
+# Step 3: Combine lipid and protein loadings
+combined_loadings <- rbind(lipid_loadings, protein_loadings)  # (355 x 5)
+
+# Step 4: Combine lipid and protein data
+combined_data <- cbind(lipid_matrix_reduced, protein_matrix_reduced)  # (154 x 355)
+
+# Step 5: Compute combined canonical variates
+combined_variates <- combined_data %*% combined_loadings  # (154 x 5)
+
+# Step 6: Create a data frame for visualization
+# Replace "TraitColumn" with the actual column name from your traits data
+cca_df <- data.frame(
+  SampleID = rownames(combined_variates),  # Use sample IDs as row names
+  Combined_Canonical1 = combined_variates[, 1],  # First canonical variate
+  Combined_Canonical2 = combined_variates[, 2],  # Second canonical variate
+  Traits = B_temp_pheno$B_HC  # Use a specific trait column
+)
+
+# Compute correlation between canonical variates and traits
+B_temp_pheno <- B_temp_pheno[-1]
+correlation_matrix <- cor(combined_variates, B_temp_pheno)
+# Convert the correlation matrix to a data frame for ggplot
+correlation_df <- as.data.frame(correlation_matrix)
+correlation_df$Canonical_Variate <- rownames(correlation_df)  # Add canonical variate names
+
+# Reshape the data frame for ggplot
+library(reshape2)
+correlation_melted <- melt(correlation_df, id.vars = "Canonical_Variate", variable.name = "Trait", value.name = "Correlation")
+# Step 7: Visualize the first pair of canonical variates
+# Load ggplot2
+library(ggplot2)
+
+# Create the heatmap
+library(Cairo)
+Cairo(4000,2000,file="Canonocal_CV_Corr.png", type="png", bg="white",res=350)
+
+ggplot(correlation_melted, aes(x = Trait, y = Canonical_Variate, fill = Correlation)) +
+  geom_tile() +  # Create tiles
+  scale_fill_gradient2(low = "blue", mid = "white", high = "red", midpoint = 0) +  # Color scale
+  theme_minimal() +  # Minimal theme
+  labs(
+    title = "Correlation Heatmap: Canonical Variates vs Traits",
+    x = "Traits",
+    y = "Canonical Variates",
+    fill = "Correlation"
+  ) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),  # Rotate x-axis labels
+    plot.title = element_text(size = 14, face = "bold")  # Customize title
+  )
+
+dev.off()
+
+ggplot(cca_df, aes(x = Combined_Canonical1, y = Combined_Canonical2, color = Traits)) +
+  geom_point(size = 3) +  # Scatter plot
+  geom_smooth(method = "lm", se = FALSE, color = "black", linetype = "dashed") +  # Correlation line
+  theme_minimal() +
+  labs(
+    title = "Canonical Correlation Analysis",
+    x = "Combined Canonical Variate 1",
+    y = "Combined Canonical Variate 2",
+    color = "Trait"
+  ) +
+  stat_cor(
+    aes(label = paste(..rr.label.., ..p.label.., sep = "~`,`~")),  # Add correlation coefficient and p-value
+    method = "pearson",  # Use Pearson correlation
+    label.x.npc = "left",  # Position of the correlation label
+    label.y.npc = "top",  # Position of the correlation label
+    size = 5,  # Size of the text
+    color = "black"  # Color of the text
+  )
+
+# Step 8: Include multiple traits (optional)
+# Melt the traits data into long format
+SampleID <- row.names(B_temp_pheno)
+B_temp_pheno <- cbind(SampleID,B_temp_pheno)
+traits_long <- melt(B_temp_pheno, id.vars = "SampleID")  # Replace "SampleID" with your sample ID column
+
+# Merge with canonical variates
+cca_df_long <- merge(cca_df, traits_long, by = "SampleID")
+
+# Visualize faceted by trait
+ggplot(cca_df_long, aes(x = Combined_Canonical1, y = Combined_Canonical2, color = value)) +
+  geom_point(size = 3) +
+  theme_minimal() +
+  labs(
+    title = "Canonical Correlation Analysis",
+    x = "Combined Canonical Variate 1",
+    y = "Combined Canonical Variate 2",
+    color = "Trait Value"
+  ) +
+  facet_wrap(~ variable)  # Facet by trait
+
+# Number of top elements to display
+N <- 10  # You can adjust this number
+
+# Function to get top N elements for a given canonical variate
+get_top_elements <- function(loadings, element_names, N) {
+  # Get absolute loadings
+  abs_loadings <- abs(loadings)
+
+  # Sort and get top N indices
+  top_indices <- order(abs_loadings, decreasing = TRUE)[1:N]
+
+  # Return top element names and their loadings
+  data.frame(
+    Element = element_names[top_indices],
+    Loading = loadings[top_indices]
+  )
+}
+
+# Get lipid and protein names
+
+lipid_names <- colnames(lipid_matrix_reduced)  # Names of lipids
+protein_names <- colnames(protein_matrix_reduced)  # Names of proteins
+
+# Get top elements for the first canonical variate
+top_lipids <- get_top_elements(rcca_result$u[, 1], lipid_names, N)
+top_proteins <- get_top_elements(rcca_result$v[, 1], protein_names, N)
+
+# Combine into a single data frame
+top_elements <- rbind(
+  data.frame(top_lipids, Type = "Lipid"),
+  data.frame(top_proteins, Type = "Protein")
+)
+
+# Add a canonical variate identifier
+
+top_elements
+
+# Number of top elements to extract for each canonical variate
+N <- 30  # You can adjust this number
+
+# Function to get top N elements for a given canonical variate
+get_top_elements <- function(loadings, element_names, N, variate_name) {
+  # Get absolute loadings
+  abs_loadings <- abs(loadings)
+
+  # Sort and get top N indices
+  top_indices <- order(abs_loadings, decreasing = TRUE)[1:N]
+
+  # Return top element names, their loadings, and the canonical variate name
+  data.frame(
+    Element = element_names[top_indices],
+    Loading = loadings[top_indices],
+    Canonical_Variate = variate_name
+  )
+}
+
+# Get lipid and protein names
+lipid_names <- colnames(lipid_matrix_reduced)  # Names of lipids
+
+protein_names <- colnames(protein_matrix_reduced)  # Names of proteins
+
+# Initialize an empty data frame to store all top elements
+top_elements_all <- data.frame()
+
+# Loop through each canonical variate
+for (k in 1:ncol(rcca_result$u)) {
+  # Get top elements for the k-th canonical variate
+  top_lipids <- get_top_elements(rcca_result$u[, k], lipid_names, N, paste0("CV", k))
+  top_proteins <- get_top_elements(rcca_result$v[, k], protein_names, N, paste0("CV", k))
+
+  # Combine into a single data frame
+  top_elements_all <- rbind(top_elements_all, top_lipids, top_proteins)
+}
+
+# Add a column to indicate whether the element is a lipid or protein
+top_elements_all$Type <- ifelse(grepl("^Lipid", top_elements_all$Element), "Lipid", "Protein")
+
+# Display the table
+
+View(top_elements_all)
