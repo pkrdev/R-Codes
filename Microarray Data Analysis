@@ -1,1 +1,82 @@
+#!/usr/bin/Rscript --slave
+
+# The job of this pipeline is to obtain the expression value of new patient microarray sample.This Pipeline is for Affymetrix HT_HG_133U_A
+# platform. In this pipeline, the new patient input data is normalized with the already existing 450 microarray sample
+
+###################################################### Loading essential Libraries #################################
+
+library(stringr)
+library(affy)
+library(limma)
+library(hthgu133acdf)
+library(genefilter)
+
+
+#cat("Do You have Sample replicates (T for Yes or F for No)");
+
+#rep <- NULL;
+
+#raw <- readLines(file("stdin"),1)
+#
+#                if (raw == "T" | raw == "TRUE" | raw == "true"){
+#               rep <- T
+#                 } else{
+#                     rep <- F
+#                       }
+#print(rep)
+
+#################################################### Handling User Input ############################################
+
+cat("Enter Location of input microarray master data directory (unix format only): ")
+master.location <- readLines(file("stdin"),1)
+
+master.location <- str_replace_all(master.location, "[\r\n]" , "")
+print(master.location)
+
+cat("Enter Location of input sample directory (unix format only): ")
+sample.location <- readLines(file("stdin"),1)
+sample.location <- str_replace_all(sample.location, "[\r\n]" , "")
+print(sample.location)
+
+################################################## Fetching input files #############################################
+
+master.list <-list.files(path=master.location, full.names = TRUE,recursive = TRUE,pattern="\\.CEL$")
+
+sample.list <-list.files(path=sample.location, full.names = TRUE,recursive = TRUE,pattern="\\.CEL$")
+
+################################################# Copying New Input files in Temp Dir ###############################
+for(i in 1:length(sample.list)) {
+file.copy(sample.list,tempdir())
+}
+
+only_sample_list <- list.files(path=tempdir())
+
+################################################# Copying Reference Master files in Temp Dir ########################
+
+for(i in 1:length(master.list)) {
+file.copy(master.list,tempdir())
+}
+
+################################################ Reading CEL Files ##################################################
+data <- ReadAffy(verbose = TRUE,celfile.path=tempdir())
+
+################################################ Affy RMA Normalization #############################################
+eset<-rma(data)
+
+################################################ Obtaining Gene Expression Matrix ###################################
+expdata <- exprs(eset)
+
+################################################ Obtaining New Sample Expression Value ##############################
+
+final <- expdata[,only_sample_list]
+
+############################################### Writting New Sample Expression Values ###############################
+write.csv(final,"expression_value.csv")
+
+
+
+
+
+
+
 
